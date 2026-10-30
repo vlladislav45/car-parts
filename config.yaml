@@ -1,0 +1,158 @@
+# Car Parts Hunter configuration.
+
+# Static exchange rates: units of each currency per 1 EUR.
+# Edit these by hand, or swap StaticRates for a live provider in carparts/currency.py.
+exchange_rates:
+  EUR: 1.0
+  GBP: 0.85
+  USD: 1.08
+  BGN: 1.95583
+  PLN: 4.30
+  CZK: 25.0
+
+http:
+  user_agent: "CarPartsHunter/0.1 (personal local research tool)"
+  default_delay_seconds: 2.0
+  timeout_seconds: 20
+  cache_ttl_hours: 6
+
+database: data/carparts.db
+
+sources:
+  # German marketplace that aggregates many breakers and dealers.
+  # robots.txt allows /shop/q-...; "no results" is answered with HTTP 410.
+  - name: autoteile-markt.de
+    type: generic_dealer
+    enabled: true
+    base_url: https://www.autoteile-markt.de
+    search_url_template: "/shop/q-{query}"
+    query_encoding: plus
+    currency: EUR
+    countries: [DE, EU]
+    location: Germany
+    languages: [any, de, en]
+    max_queries: 6
+    request_delay_seconds: 2.5
+    extract:
+      strategy: css
+      item: "div.card.itemRow"
+      fields:
+        title: ".itemTitle"
+        url:
+          - {selector: "a.itemTitle", attr: "href"}
+          - {selector: ".itemTitle", attr: "data-href64", decode: base64}
+        price: ".itemPrice .price"
+        shipping: ".itemPrice .small"
+        condition: ".itemPrice b"
+        oem_numbers: {label: "OE:"}
+        part_number: {label: "MPN:"}
+        compatibility: {label: "für OE-Nummer:"}
+        description: {label: "Beschreibung:"}
+        image_url: {selector: "img.card-img", attr: "src"}
+
+  # Bulgarian classifieds. robots.txt allows /obiavi?q=... (it disallows the
+  # /obiavi/<category>/<region> pages, which we never request). Searched in Bulgarian.
+  # Private sellers and small breakers: condition and shipping are rarely stated.
+  - name: bazar.bg
+    type: generic_dealer
+    enabled: true
+    base_url: https://bazar.bg
+    search_url_template: "/obiavi?q={query}"
+    query_encoding: plus
+    currency: EUR
+    countries: [BG]
+    location: Bulgaria
+    languages: [any, bg]
+    max_queries: 6
+    request_delay_seconds: 2.5
+    min_price: 2
+    extract:
+      strategy: css
+      item: "div.listItemContainer"
+      fields:
+        title: "span.title"
+        url: {selector: "a.listItemLink", attr: "href"}
+        price: "span.price"
+        condition: "span.title"
+        location: "span.location"
+        image_url: {selector: "img.cover", attr: "src"}
+
+  # Danish breaker network (used parts only). robots.txt allows the first results
+  # page (/search/1/) and disallows later pages, which we never request. Its free-text
+  # search only finds part numbers, so it only runs the bare OEM number query.
+  - name: autoparts24.eu
+    type: generic_dealer
+    enabled: true
+    base_url: https://www.autoparts24.eu
+    search_url_template: "/search/1/?type=all&q={query}"
+    query_encoding: plus
+    currency: EUR
+    countries: [EU]
+    location: Denmark
+    languages: [any]
+    max_queries: 1
+    request_delay_seconds: 2.5
+    default_condition: used
+    extract:
+      strategy: css
+      item: "li.productList__item"
+      fields:
+        title: [{selector: "img.visual", attr: "alt"}, "a.link---productList__title"]
+        url: {selector: "a.link---productList__title", attr: "href"}
+        price: {selector: ".productList__price [data-price]", attr: "data-price"}
+        oem_numbers: {label: "Original Nummer (OEM)"}
+        compatibility: ".carInfo"
+        image_url: {selector: "img.visual", attr: "src"}
+
+  # UK marketplace for breakers' used (and some new) parts, prices in GBP.
+  # robots.txt disallows /search/ and /products/, but the site's own text search
+  # lands on /online-car-parts?text=..., which is allowed (Crawl-delay: 2).
+  # Understands both part numbers and vehicle + part name. Item images are not
+  # fetched: robots.txt disallows the proxied eBay image paths.
+  - name: breakeryard.com
+    type: generic_dealer
+    enabled: true
+    base_url: https://www.breakeryard.com
+    search_url_template: "/online-car-parts?text={query}"
+    query_encoding: percent
+    currency: GBP
+    countries: [GB]
+    location: United Kingdom
+    languages: [any, en]
+    max_queries: 4
+    request_delay_seconds: 2.5
+    extract:
+      strategy: css
+      item: "div.wide-listed-item"
+      fields:
+        title: "h3.product-teaser__title"
+        url: {selector: ".wide-listed-item__item > a", attr: "href"}
+        price: ".by-price"
+        shipping: ".mp-product-info__delivery"
+        condition: ".mp-product-info__condition"
+        seller: ".seller-teaser__title"
+
+  # Template for any shop that embeds schema.org Product data (JSON-LD).
+  # Copy, set the URL template, check the site's robots.txt, then enable.
+  - name: example-jsonld-shop
+    type: generic_dealer
+    enabled: false
+    base_url: https://shop.example.com
+    search_url_template: "/search?q={query}"
+    query_encoding: plus
+    currency: EUR
+    countries: [EU]
+    extract:
+      strategy: jsonld
+
+  # Official eBay Browse API. Needs EBAY_CLIENT_ID and EBAY_CLIENT_SECRET (env vars or .env).
+  # Without them it offers links to eBay's search page instead. eBay's web pages can't be
+  # scraped (robots.txt disallows /sch/, 403 to scripts), so there is no eBay (web) source.
+  - name: eBay (Browse API)
+    type: ebay_api
+    enabled: true
+    marketplace: EBAY_DE
+
+  # Web search (Google/Bing) is not listed: their robots.txt disallows /search and scripted
+  # clients get a CAPTCHA. To use it, plug in an official search API in
+  # carparts/sources/web_search.py and add an entry with type: web_search.
